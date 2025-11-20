@@ -33,23 +33,27 @@ const onboardButton = document.getElementById('onboardButton');
 function waitForFaceAPI() {
     return new Promise((resolve, reject) => {
         // Check if already loaded
-        if (typeof faceapi !== 'undefined') {
+        if (typeof faceapi !== 'undefined' && faceapi.nets) {
+            console.log('face-api.js library is already loaded');
             resolve();
             return;
         }
         
-        // Wait for it to load (max 10 seconds)
+        // Wait for it to load (max 15 seconds)
         let attempts = 0;
-        const maxAttempts = 100; // 10 seconds (100 * 100ms)
+        const maxAttempts = 150; // 15 seconds (150 * 100ms)
         
         const checkInterval = setInterval(() => {
             attempts++;
-            if (typeof faceapi !== 'undefined') {
+            if (typeof faceapi !== 'undefined' && faceapi.nets) {
                 clearInterval(checkInterval);
+                console.log('face-api.js library loaded after', attempts * 100, 'ms');
                 resolve();
             } else if (attempts >= maxAttempts) {
                 clearInterval(checkInterval);
-                reject(new Error('face-api.js library failed to load within timeout'));
+                const error = new Error('face-api.js library failed to load. Check if the CDN script tag is correct in index.html.');
+                console.error('face-api.js loading timeout. typeof faceapi:', typeof faceapi);
+                reject(error);
             }
         }, 100);
     });
@@ -87,79 +91,82 @@ async function loadFaceModels() {
         
         console.log('Starting to load face recognition models...');
         
-        // Try multiple CDN sources for better reliability
-        const MODEL_URLS = [
-            'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/weights/',
-            'https://unpkg.com/face-api.js@0.22.2/weights/',
-            'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/'
-        ];
-        
-        let modelUrl = MODEL_URLS[0];
-        let loadError = null;
-        
-        // Try first CDN
-        try {
-            console.log('Trying to load models from:', modelUrl);
-            await Promise.all([
-                faceapi.nets.tinyFaceDetector.loadFromUri(modelUrl),
-                faceapi.nets.faceLandmark68Net.loadFromUri(modelUrl),
-                faceapi.nets.faceRecognitionNet.loadFromUri(modelUrl)
-            ]);
-            
-            modelsLoaded = true;
-            console.log('Face models loaded successfully from', modelUrl);
-            
-            // Hide loading indicator
-            if (modelStatus) {
-                modelStatus.classList.add('hidden');
-            }
-            
-            if (statusMessage) {
-                statusMessage.querySelector('p').textContent = 'Models loaded. Ready for verification.';
-            }
-            return;
-        } catch (firstError) {
-            console.warn('First CDN failed, trying alternative...', firstError);
-            loadError = firstError;
-            modelUrl = MODEL_URLS[1];
+        // Verify faceapi is properly loaded
+        if (!faceapi || !faceapi.nets) {
+            throw new Error('face-api.js library is not properly loaded. Please refresh the page.');
         }
         
-        // Try alternative CDNs
-        for (let i = 1; i < MODEL_URLS.length; i++) {
-            try {
-                modelUrl = MODEL_URLS[i];
-                console.log(`Trying to load models from CDN ${i + 1}:`, modelUrl);
-                await Promise.all([
-                    faceapi.nets.tinyFaceDetector.loadFromUri(modelUrl),
-                    faceapi.nets.faceLandmark68Net.loadFromUri(modelUrl),
-                    faceapi.nets.faceRecognitionNet.loadFromUri(modelUrl)
-                ]);
-                
-                modelsLoaded = true;
-                console.log(`Face models loaded successfully from CDN ${i + 1}`);
-                
-                // Hide loading indicator
-                if (modelStatus) {
-                    modelStatus.classList.add('hidden');
-                }
-                
-                if (statusMessage) {
-                    statusMessage.querySelector('p').textContent = 'Models loaded. Ready for verification.';
-                }
-                return;
-            } catch (cdnError) {
-                console.warn(`CDN ${i + 1} failed:`, cdnError);
-                if (i === MODEL_URLS.length - 1) {
-                    throw cdnError;
-                }
-            }
+        console.log('face-api.js library verified:', {
+            hasNets: !!faceapi.nets,
+            hasTinyFaceDetector: !!faceapi.nets.tinyFaceDetector,
+            hasFaceLandmark68Net: !!faceapi.nets.faceLandmark68Net,
+            hasFaceRecognitionNet: !!faceapi.nets.faceRecognitionNet
+        });
+        
+        // Use local models
+        const MODEL_URL = './models';
+        
+        if (modelStatus) {
+            modelStatus.innerHTML = `<div class="spinner-small"></div><span>Loading local face recognition models...</span>`;
+        }
+        
+        // Helper function to load a single model with timeout
+        async function loadModelWithTimeout(model, url, timeout = 30000) {
+            return Promise.race([
+                model.loadFromUri(url),
+                new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('Model load timeout after 30 seconds')), timeout)
+                )
+            ]);
+        }
+        
+        // Load models sequentially with better error reporting
+        try {
+            console.log('Loading tinyFaceDetector...');
+            await loadModelWithTimeout(faceapi.nets.tinyFaceDetector, MODEL_URL);
+            console.log('✓ tinyFaceDetector loaded');
+        } catch (err) {
+            console.error('Failed to load tinyFaceDetector:', err);
+            throw new Error(`Failed to load tinyFaceDetector: ${err.message}`);
+        }
+        
+        try {
+            console.log('Loading faceLandmark68Net...');
+            await loadModelWithTimeout(faceapi.nets.faceLandmark68Net, MODEL_URL);
+            console.log('✓ faceLandmark68Net loaded');
+        } catch (err) {
+            console.error('Failed to load faceLandmark68Net:', err);
+            throw new Error(`Failed to load faceLandmark68Net: ${err.message}`);
+        }
+        
+        try {
+            console.log('Loading faceRecognitionNet...');
+            await loadModelWithTimeout(faceapi.nets.faceRecognitionNet, MODEL_URL);
+            console.log('✓ faceRecognitionNet loaded');
+        } catch (err) {
+            console.error('Failed to load faceRecognitionNet:', err);
+            throw new Error(`Failed to load faceRecognitionNet: ${err.message}`);
+        }
+        
+        // All models loaded successfully
+        modelsLoaded = true;
+        console.log('✓ All face models loaded successfully from local files');
+        
+        // Hide loading indicator
+        if (modelStatus) {
+            modelStatus.classList.add('hidden');
+        }
+        
+        if (statusMessage) {
+            statusMessage.querySelector('p').textContent = 'Models loaded. Ready for verification.';
         }
         
     } catch (error) {
         console.error('Error loading face models:', error);
         console.error('Error details:', {
             message: error.message,
-            stack: error.stack
+            stack: error.stack,
+            name: error.name
         });
         
         modelsLoaded = false;
@@ -173,62 +180,57 @@ async function loadFaceModels() {
             statusMessage.querySelector('p').textContent = 'Error loading face recognition models. Please refresh the page.';
         }
         
-        // More helpful error message
-        const errorMsg = 'Unable to load face recognition system.\n\n' +
-            'Possible causes:\n' +
-            '• No internet connection\n' +
-            '• Firewall blocking CDN access\n' +
-            '• Browser security restrictions\n\n' +
-            'Please check your connection and refresh the page.';
+        // Check if it's a network/CORS error
+        const isCorsError = error.message && (
+            error.message.includes('CORS') ||
+            error.message.includes('Access-Control')
+        );
+        const isNetworkError = error.message && (
+            error.message.includes('Failed to fetch') ||
+            error.message.includes('NetworkError') ||
+            error.message.includes('timeout')
+        );
         
-        alert(errorMsg);
-    }
+        let errorMsg = 'Unable to load face recognition system.\n\n';
+        errorMsg += `Error: ${errorDetails}\n\n`;
+        
+        if (isCorsError) {
+            errorMsg += '⚠️ CORS Error Detected:\n';
 }
 
 // Setup event listeners
 function setupEventListeners() {
     // Upload area click
-    uploadArea.addEventListener('click', () => idCardInput.click());
-    
-    // File input change
-    idCardInput.addEventListener('change', handleIdCardUpload);
-    
-    // Change ID card button
-    changeIdCardBtn.addEventListener('click', () => {
-        idCardInput.click();
-    });
-    
-    // Proceed to verification
-    proceedBtn.addEventListener('click', () => {
-        if (idCardImageData) {
-            switchToVerificationPage();
-        }
-    });
-    
-    // Back to upload
-    backToUploadBtn.addEventListener('click', () => {
-        stopCamera();
-        switchToUploadPage();
-    });
-    
-    // Capture photo
-    capturePhotoBtn.addEventListener('click', capturePhoto);
-    
-    // Retake photo
-    retakePhotoBtn.addEventListener('click', () => {
-        capturedPhotoContainer.classList.add('hidden');
-        capturePhotoBtn.style.display = 'block';
-        capturedPhoto = null;
+    uploadBtn.addEventListener('click', () => fileInput.click());
+
+    fileInput.addEventListener('change', handleFileUpload);
+
+    changeImageBtn.addEventListener('click', () => fileInput.click());
+
+    proceedToVerificationBtn.addEventListener('click', () => {
+        uploadPage.classList.add('hidden');
+        verificationPage.classList.remove('hidden');
         startCamera();
     });
-    
-    // Verify face
-    verifyFaceBtn.addEventListener('click', verifyFace);
-    
-    // Onboard button
-    onboardButton.addEventListener('click', () => {
-        window.location.href = CORTEXA_URL;
+
+    backToUploadBtn.addEventListener('click', () => {
+        stopCamera();
+        verificationPage.classList.add('hidden');
+        uploadPage.classList.remove('hidden');
     });
+
+    capturePhotoBtn.addEventListener('click', capturePhoto);
+
+    retakePhotoBtn.addEventListener('click', () => {
+        capturedPhotoContainer.classList.add('hidden');
+        buttonGroup.classList.remove('hidden');
+        statusMessage.querySelector('p').textContent = 'Please position your face in the frame';
+    });
+
+    verifyFaceBtn.addEventListener('click', verifyFace);
+
+    // Onboard button - redirect to Cortexa
+    onboardButton.addEventListener('click', redirectToTarget);
     
     // Drag and drop
     uploadArea.addEventListener('dragover', (e) => {
@@ -346,7 +348,7 @@ async function verifyFace() {
     
     verificationLoader.classList.remove('hidden');
     verifyFaceBtn.disabled = true;
-    statusMessage.querySelector('p').textContent = 'Verifying your identity...';
+    statusMessage.querySelector('p').textContent = 'Analyzing facial features...';
     
     try {
         let match = false;
@@ -357,19 +359,27 @@ async function verifyFace() {
         verificationLoader.classList.add('hidden');
         
         if (match) {
-            statusMessage.querySelector('p').textContent = 'Verification successful!';
+            statusMessage.querySelector('p').textContent = '✓ Identity verified successfully!';
             showSuccessModal();
         } else {
             statusMessage.querySelector('p').textContent = 'Verification failed. Please try again.';
-            alert('Face verification failed. The face in your photo does not match the ID card. Please ensure:\n\n• Good lighting\n• Face is clearly visible\n• Same person in both images\n• No obstructions (glasses, masks, etc.)');
+            // Don't automatically retake - let user decide
             verifyFaceBtn.disabled = false;
-            retakePhotoBtn.click();
         }
     } catch (error) {
         console.error('Verification error:', error);
         verificationLoader.classList.add('hidden');
         statusMessage.querySelector('p').textContent = 'Error during verification. Please try again.';
-        alert('An error occurred during verification. Please try again.');
+        
+        // Provide specific error guidance
+        if (error.message && error.message.includes('network')) {
+            alert('Network error during verification. Please check your internet connection and try again.');
+        } else if (error.message && error.message.includes('memory')) {
+            alert('System memory error. Please try refreshing the page or using smaller image files.');
+        } else {
+            alert('An unexpected error occurred during verification. This could be due to:\n\n• Browser compatibility issues\n• Large image file sizes\n• System resource limitations\n\nPlease try refreshing the page and attempting verification again.');
+        }
+        
         verifyFaceBtn.disabled = false;
     }
 }
@@ -391,38 +401,82 @@ async function performFaceRecognition() {
             idCardImg.src = idCardImageData;
         });
         
-        // Use more accurate face detection options
+        // Preprocess images for better face detection
+        const processedIdCard = await preprocessImage(idCardImg);
+        const processedCaptured = await preprocessImage(capturedImg);
+        
+        // Use more accurate face detection options with balanced settings
         const detectionOptions = new faceapi.TinyFaceDetectorOptions({
             inputSize: 416, // Higher resolution for better accuracy
-            scoreThreshold: 0.5 // Minimum confidence for face detection
+            scoreThreshold: 0.3 // Lower threshold for better detection rate
         });
         
         // Detect faces with landmarks and descriptors
-        const idCardDetection = await faceapi
-            .detectSingleFace(idCardImg, detectionOptions)
-            .withFaceLandmarks68()
+        let idCardDetection = await faceapi
+            .detectSingleFace(processedIdCard, detectionOptions)
+            .withFaceLandmarks()
+            .withFaceDescriptor();
+            
+        let capturedDetection = await faceapi
+            .detectSingleFace(processedCaptured, detectionOptions)
+            .withFaceLandmarks()
             .withFaceDescriptor();
         
-        const capturedDetection = await faceapi
-            .detectSingleFace(capturedImg, detectionOptions)
-            .withFaceLandmarks68()
-            .withFaceDescriptor();
+        // Retry with different options if initial detection fails
+        if (!idCardDetection || !capturedDetection) {
+            console.log('Retrying with different detection options...');
+            const retryOptions = new faceapi.TinyFaceDetectorOptions({
+                inputSize: 320,
+                scoreThreshold: 0.2 // Even lower threshold for retry
+            });
+            
+            if (!idCardDetection) {
+                idCardDetection = await faceapi
+                    .detectSingleFace(processedIdCard, retryOptions)
+                    .withFaceLandmarks()
+                    .withFaceDescriptor();
+            }
+            
+            if (!capturedDetection) {
+                capturedDetection = await faceapi
+                    .detectSingleFace(processedCaptured, retryOptions)
+                    .withFaceLandmarks()
+                    .withFaceDescriptor();
+            }
+        }
         
         // Validate that faces were detected
         if (!idCardDetection || !capturedDetection) {
-            console.log('Could not detect faces in one or both images');
-            alert('Could not detect a face in one or both images. Please ensure your face is clearly visible.');
+            const missingIdCard = !idCardDetection;
+            const missingCaptured = !capturedDetection;
+            
+            if (missingIdCard && missingCaptured) {
+                alert('Could not detect faces in either image. Please ensure:\n• Clear face visibility in both photos\n• Good lighting conditions\n• Face is not covered by masks or glasses\n• Photos are not blurry');
+            } else if (missingIdCard) {
+                alert('Could not detect a face in your ID photo. Please ensure:\n• The ID photo shows a clear face\n• The face is not too small or cropped\n• Try uploading a different ID photo');
+            } else {
+                alert('Could not detect your face in the captured photo. Please:\n• Position your face clearly in the frame\n• Ensure good lighting\n• Remove glasses or masks if possible\n• Try capturing the photo again');
+            }
             return false;
         }
         
-        // Additional validation: Check face detection confidence
-        // Require high confidence (0.75) for both face detections
-        if (idCardDetection.detection.score < 0.75 || capturedDetection.detection.score < 0.75) {
+        // More reasonable confidence threshold (0.5 instead of 0.75)
+        if (idCardDetection.detection.score < 0.5 || capturedDetection.detection.score < 0.5) {
             console.log('Low face detection confidence:', {
                 idCard: idCardDetection.detection.score,
                 captured: capturedDetection.detection.score
             });
-            alert('Face detection confidence is low. Please ensure good lighting and clear face visibility.');
+            
+            const lowIdCard = idCardDetection.detection.score < 0.5;
+            const lowCaptured = capturedDetection.detection.score < 0.5;
+            
+            if (lowIdCard && lowCaptured) {
+                alert('Face detection confidence is low in both photos. Please ensure:\n• Better lighting conditions\n• Clear face visibility\n• High quality photos');
+            } else if (lowIdCard) {
+                alert('Face detection confidence is low in your ID photo. Please try uploading a clearer ID photo with better face visibility.');
+            } else {
+                alert('Face detection confidence is low in your captured photo. Please:\n• Improve lighting conditions\n• Position your face more clearly\n• Try capturing the photo again');
+            }
             return false;
         }
         
@@ -432,13 +486,17 @@ async function performFaceRecognition() {
         
         const idCardFaceArea = idCardBox.width * idCardBox.height;
         const capturedFaceArea = capturedBox.width * capturedBox.height;
-        const idCardImageArea = idCardImg.width * idCardImg.height;
-        const capturedImageArea = capturedImg.width * capturedImg.height;
+        const idCardImageArea = processedIdCard.width * processedIdCard.height;
+        const capturedImageArea = processedCaptured.width * processedCaptured.height;
         
-        // Face should be at least 5% of the image area
-        if (idCardFaceArea < idCardImageArea * 0.05 || capturedFaceArea < capturedImageArea * 0.05) {
+        // Face should be at least 3% of the image area (reduced from 5%)
+        if (idCardFaceArea < idCardImageArea * 0.03 || capturedFaceArea < capturedImageArea * 0.03) {
             console.log('Face too small in image');
-            alert('Face is too small in the image. Please get closer to the camera or use a larger face image.');
+            if (idCardFaceArea < idCardImageArea * 0.03) {
+                alert('The face in your ID photo is too small. Please upload an ID photo with a larger, clearer face image.');
+            } else {
+                alert('Your face is too small in the captured photo. Please get closer to the camera or position your face more prominently.');
+            }
             return false;
         }
         
@@ -448,11 +506,9 @@ async function performFaceRecognition() {
             capturedDetection.descriptor
         );
         
-        // Stricter threshold for face match (lower is more similar)
-        // 0.35-0.4 is very strict - only very similar faces will match
-        // 0.45 is strict but allows for slight variations (lighting, angle)
-        const threshold = 0.4; // Very strict threshold for maximum accuracy
-        
+        // More reasonable threshold for face match
+        // 0.6 allows for more realistic variations while maintaining security
+        const threshold = 0.6;
         const isMatch = distance < threshold;
         
         console.log('Face detection scores:', {
@@ -462,30 +518,89 @@ async function performFaceRecognition() {
         console.log('Face distance:', distance.toFixed(4), 'Threshold:', threshold, 'Match:', isMatch);
         
         // Additional check: If distance is very high, definitely not a match
-        if (distance > 0.7) {
+        if (distance > 0.8) {
             console.log('Face distance too high, definitely not a match');
+            alert('Face verification failed. The faces do not appear to match. Please ensure:\n• You are the same person in both photos\n• Similar facial expression and angle\n• No significant changes in appearance');
             return false;
+        }
+        
+        // Provide feedback for close matches
+        if (distance > threshold && distance < 0.8) {
+            alert('Face verification could not confirm a match. The faces appear similar but verification criteria were not met. Please try again with:\n• Better lighting\n• Similar facial expression\n• Face positioned at a similar angle');
         }
         
         return isMatch;
     } catch (error) {
         console.error('Face recognition error:', error);
-        alert('Error during face recognition. Please try again.');
+        alert('An error occurred during face recognition. This could be due to:\n• Network connectivity issues\n• Browser compatibility\n• Large image sizes\n\nPlease try refreshing the page and attempting again.');
         return false;
     }
 }
 
-// Basic image comparison (fallback)
-async function performBasicVerification() {
-    // This fallback should NOT automatically pass verification
-    // It should fail if face-api.js models are not loaded
+// Image preprocessing function
+async function preprocessImage(img) {
+    // Create a canvas for preprocessing
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    // Set canvas size to match image
+    canvas.width = img.width;
+    canvas.height = img.height;
+    
+    // Draw the original image
+    ctx.drawImage(img, 0, 0);
+    
+    // Get image data for processing
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+    
+    // Apply histogram equalization for better contrast
+    const histogram = new Array(256).fill(0);
+    for (let i = 0; i < data.length; i += 4) {
+        const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+        histogram[Math.floor(gray)]++;
+    }
+    
+    // Calculate cumulative distribution
+    const cdf = new Array(256);
+    cdf[0] = histogram[0];
+    for (let i = 1; i < 256; i++) {
+        cdf[i] = cdf[i - 1] + histogram[i];
+    }
+    
+    // Normalize to 0-255 range
+    const cdfMin = cdf.find(val => val > 0);
+    const cdfMax = cdf[255];
+    const lut = new Array(256);
+    
+    for (let i = 0; i < 256; i++) {
+        if (cdf[i] >= cdfMin) {
+            lut[i] = Math.round(((cdf[i] - cdfMin) / (cdfMax - cdfMin)) * 255);
+        } else {
+            lut[i] = 0;
+        }
+    }
+    
+    // Apply the lookup table
+    for (let i = 0; i < data.length; i += 4) {
+        const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+        const normalizedValue = lut[Math.floor(gray)];
+        const ratio = normalizedValue / (gray || 1);
+        
+        data[i] = Math.min(255, data[i] * ratio);
+        data[i + 1] = Math.min(255, data[i + 1] * ratio);
+        data[i + 2] = Math.min(255, data[i + 2] * ratio);
+    }
+    
+    // Put the processed image back
+    ctx.putImageData(imageData, 0, 0);
+    
+    // Convert back to image element
+    const processedImg = new Image();
+    processedImg.src = canvas.toDataURL();
+    
     return new Promise((resolve) => {
-        setTimeout(() => {
-            // Always fail if models are not loaded - we need proper face recognition
-            console.warn('Face recognition models not loaded. Verification cannot proceed.');
-            alert('Face recognition system is not available. Please refresh the page and try again.');
-            resolve(false);
-        }, 1000);
+        processedImg.onload = () => resolve(processedImg);
     });
 }
 
@@ -493,6 +608,33 @@ async function performBasicVerification() {
 function showSuccessModal() {
     successModal.classList.remove('hidden');
     document.body.style.overflow = 'hidden';
+    
+    // Auto-redirect after 3 seconds
+    setTimeout(() => {
+        redirectToTarget();
+    }, 3000);
+}
+
+// Redirect to target destination
+function redirectToTarget() {
+    // Use the existing CORTEXA_URL constant
+    const targetUrl = CORTEXA_URL;
+    
+    // Show a brief message before redirect
+    const modalContent = document.querySelector('.modal-content');
+    const redirectMessage = document.createElement('div');
+    redirectMessage.className = 'redirect-message';
+    redirectMessage.innerHTML = `
+        <p style="margin-top: 20px; color: var(--text-secondary); font-size: 14px;">
+            Redirecting you to Cortexa Interview...
+        </p>
+    `;
+    modalContent.appendChild(redirectMessage);
+    
+    // Perform redirect
+    setTimeout(() => {
+        window.location.href = targetUrl;
+    }, 1500);
 }
 
 // Cleanup on page unload
