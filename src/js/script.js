@@ -103,8 +103,8 @@ async function loadFaceModels() {
             hasFaceRecognitionNet: !!faceapi.nets.faceRecognitionNet
         });
         
-        // Use local models
-        const MODEL_URL = './models';
+        // Use local models - path relative to src folder
+        const MODEL_URL = '../models';
         
         if (modelStatus) {
             modelStatus.innerHTML = `<div class="spinner-small"></div><span>Loading local face recognition models...</span>`;
@@ -192,38 +192,58 @@ async function loadFaceModels() {
         );
         
         let errorMsg = 'Unable to load face recognition system.\n\n';
-        errorMsg += `Error: ${errorDetails}\n\n`;
+        errorMsg += `Error: ${error.message}\n\n`;
         
         if (isCorsError) {
             errorMsg += '⚠️ CORS Error Detected:\n';
+            errorMsg += 'The models cannot be loaded due to browser security restrictions.\n';
+            errorMsg += 'Solutions:\n';
+            errorMsg += '1. Serve this page from a local web server (not file://)\n';
+            errorMsg += '2. Use a browser extension to disable CORS for local testing\n';
+            errorMsg += '3. Deploy to a web server with proper CORS headers\n\n';
+        }
+        
+        if (isNetworkError) {
+            errorMsg += '⚠️ Network Error Detected:\n';
+            errorMsg += 'Please check your internet connection and refresh the page.\n\n';
+        }
+        
+        errorMsg += 'Technical Details:\n';
+        errorMsg += `• Error Type: ${error.name}\n`;
+        errorMsg += `• Message: ${error.message}`;
+        
+        alert(errorMsg);
+        
+        throw error;
+    }
 }
 
 // Setup event listeners
 function setupEventListeners() {
     // Upload area click
-    uploadBtn.addEventListener('click', () => fileInput.click());
+    uploadArea.addEventListener('click', () => idCardInput.click());
 
-    fileInput.addEventListener('change', handleFileUpload);
+    idCardInput.addEventListener('change', handleIdCardUpload);
 
-    changeImageBtn.addEventListener('click', () => fileInput.click());
+    changeIdCardBtn.addEventListener('click', () => idCardInput.click());
 
-    proceedToVerificationBtn.addEventListener('click', () => {
-        uploadPage.classList.add('hidden');
-        verificationPage.classList.remove('hidden');
+    proceedBtn.addEventListener('click', () => {
+        uploadPage.classList.remove('active');
+        verificationPage.classList.add('active');
         startCamera();
     });
 
     backToUploadBtn.addEventListener('click', () => {
         stopCamera();
-        verificationPage.classList.add('hidden');
-        uploadPage.classList.remove('hidden');
+        verificationPage.classList.remove('active');
+        uploadPage.classList.add('active');
     });
 
     capturePhotoBtn.addEventListener('click', capturePhoto);
 
     retakePhotoBtn.addEventListener('click', () => {
         capturedPhotoContainer.classList.add('hidden');
-        buttonGroup.classList.remove('hidden');
+        capturePhotoBtn.style.display = 'flex';
         statusMessage.querySelector('p').textContent = 'Please position your face in the frame';
     });
 
@@ -405,10 +425,10 @@ async function performFaceRecognition() {
         const processedIdCard = await preprocessImage(idCardImg);
         const processedCaptured = await preprocessImage(capturedImg);
         
-        // Use more accurate face detection options with balanced settings
+        // Use more accurate face detection options with higher resolution
         const detectionOptions = new faceapi.TinyFaceDetectorOptions({
-            inputSize: 416, // Higher resolution for better accuracy
-            scoreThreshold: 0.3 // Lower threshold for better detection rate
+            inputSize: 608, // Highest resolution for best accuracy
+            scoreThreshold: 0.2 // Lower threshold for better detection rate
         });
         
         // Detect faces with landmarks and descriptors
@@ -422,12 +442,12 @@ async function performFaceRecognition() {
             .withFaceLandmarks()
             .withFaceDescriptor();
         
-        // Retry with different options if initial detection fails
+        // Second retry with even more lenient options
         if (!idCardDetection || !capturedDetection) {
             console.log('Retrying with different detection options...');
             const retryOptions = new faceapi.TinyFaceDetectorOptions({
-                inputSize: 320,
-                scoreThreshold: 0.2 // Even lower threshold for retry
+                inputSize: 608,
+                scoreThreshold: 0.1 // Very lenient threshold for retry
             });
             
             if (!idCardDetection) {
@@ -460,24 +480,14 @@ async function performFaceRecognition() {
             return false;
         }
         
-        // More reasonable confidence threshold (0.5 instead of 0.75)
-        if (idCardDetection.detection.score < 0.5 || capturedDetection.detection.score < 0.5) {
-            console.log('Low face detection confidence:', {
+        // Lower confidence threshold - just warn if low, don't block (0.3 instead of 0.5)
+        if (idCardDetection.detection.score < 0.3 || capturedDetection.detection.score < 0.3) {
+            console.log('Low face detection confidence (but continuing):', {
                 idCard: idCardDetection.detection.score,
                 captured: capturedDetection.detection.score
             });
-            
-            const lowIdCard = idCardDetection.detection.score < 0.5;
-            const lowCaptured = capturedDetection.detection.score < 0.5;
-            
-            if (lowIdCard && lowCaptured) {
-                alert('Face detection confidence is low in both photos. Please ensure:\n• Better lighting conditions\n• Clear face visibility\n• High quality photos');
-            } else if (lowIdCard) {
-                alert('Face detection confidence is low in your ID photo. Please try uploading a clearer ID photo with better face visibility.');
-            } else {
-                alert('Face detection confidence is low in your captured photo. Please:\n• Improve lighting conditions\n• Position your face more clearly\n• Try capturing the photo again');
-            }
-            return false;
+            // Show warning but don't block - continue with verification
+            console.warn('Low confidence detected, but proceeding with verification anyway');
         }
         
         // Validate face size (faces should be reasonably sized)
@@ -506,9 +516,9 @@ async function performFaceRecognition() {
             capturedDetection.descriptor
         );
         
-        // More reasonable threshold for face match
-        // 0.6 allows for more realistic variations while maintaining security
-        const threshold = 0.6;
+        // More lenient threshold for face match (0.65 allows more realistic variations)
+        // 0.0 = same face, 1.0 = completely different
+        const threshold = 0.65;
         const isMatch = distance < threshold;
         
         console.log('Face detection scores:', {
@@ -517,16 +527,16 @@ async function performFaceRecognition() {
         });
         console.log('Face distance:', distance.toFixed(4), 'Threshold:', threshold, 'Match:', isMatch);
         
-        // Additional check: If distance is very high, definitely not a match
-        if (distance > 0.8) {
+        // Additional check: If distance is very high, definitely not a match (raised to 0.85)
+        if (distance > 0.85) {
             console.log('Face distance too high, definitely not a match');
             alert('Face verification failed. The faces do not appear to match. Please ensure:\n• You are the same person in both photos\n• Similar facial expression and angle\n• No significant changes in appearance');
             return false;
         }
         
-        // Provide feedback for close matches
-        if (distance > threshold && distance < 0.8) {
-            alert('Face verification could not confirm a match. The faces appear similar but verification criteria were not met. Please try again with:\n• Better lighting\n• Similar facial expression\n• Face positioned at a similar angle');
+        // Provide feedback for close matches - more lenient range
+        if (distance >= threshold && distance <= 0.85) {
+            alert('Face verification could not confirm a strong match. The faces appear similar but verification criteria were not fully met. Please try again with:\n• Better lighting\n• Similar facial expression\n• Face positioned at a similar angle');
         }
         
         return isMatch;

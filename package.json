@@ -1,0 +1,24 @@
+{
+  "name": "verification-website",
+  "version": "1.0.0",
+  "description": "A modern web application for verifying student identity by comparing a live camera photo with an uploaded ID card image using AI-powered face recognition.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yuvrajnode/face-match-auth.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/yuvrajnode/face-match-auth/issues"
+  },
+  "homepage": "https://github.com/yuvrajnode/face-match-auth#readme",
+  "dependencies": {
+    "@vladmandic/face-api": "^1.7.15",
+    "face-api.js": "^0.22.2"
+  }
+}
