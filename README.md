@@ -2,6 +2,8 @@
 
 A modern web application for verifying student identity by comparing a live camera photo with an uploaded ID card image using AI-powered face recognition.
 
+**Live demo →** [face-match-auth.vercel.app](https://face-match-auth.vercel.app) (needs camera access)
+
 ## Features
 
 - 📸 **ID Card Upload**: Drag-and-drop or click-to-upload interface
