@@ -1,4 +1,4 @@
-# Student Identity Verification Website
+# Face Match · Browser Identity Verification Demo
 
 A modern web application for verifying student identity by comparing a live camera photo with an uploaded ID card image using AI-powered face recognition.
 
